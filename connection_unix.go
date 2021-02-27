@@ -35,18 +35,19 @@ import (
 )
 
 type conn struct {
-	fd             int                    // file descriptor
-	sa             unix.Sockaddr          // remote socket address
-	ctx            interface{}            // user-defined context
-	loop           *eventloop             // connected event-loop
-	codec          ICodec                 // codec for TCP
-	buffer         []byte                 // reuse memory of inbound data as a temporary buffer
-	opened         bool                   // connection opened event fired
-	localAddr      net.Addr               // local addr
-	remoteAddr     net.Addr               // remote addr
-	byteBuffer     *bytebuffer.ByteBuffer // bytes buffer for buffering current packet and data in ring-buffer
-	inboundBuffer  *ringbuffer.RingBuffer // buffer for data from client
-	outboundBuffer *ringbuffer.RingBuffer // buffer for data that is ready to write to client
+	fd                   int                    // file descriptor
+	sa                   unix.Sockaddr          // remote socket address
+	ctx                  interface{}            // user-defined context
+	loop                 *eventloop             // connected event-loop
+	codec                ICodec                 // codec for TCP
+	buffer               []byte                 // reuse memory of inbound data as a temporary buffer
+	opened               bool                   // connection opened event fired
+	localAddr            net.Addr               // local addr
+	remoteAddr           net.Addr               // remote addr
+	byteBuffer           *bytebuffer.ByteBuffer // bytes buffer for buffering current packet and data in ring-buffer
+	inboundBuffer        *ringbuffer.RingBuffer // buffer for data from client
+	outboundBuffer       *ringbuffer.RingBuffer // buffer for data that is ready to write to client
+	socketSendBufferFull bool                   // how many read calls the socket has missed
 }
 
 func newTCPConn(fd int, el *eventloop, sa unix.Sockaddr, remoteAddr net.Addr) (c *conn) {
@@ -138,6 +139,7 @@ func (c *conn) write(buf []byte) (err error) {
 	if n, err = unix.Write(c.fd, outFrame); err != nil {
 		// A temporary error occurs, append the data to outbound buffer, writing it back to client in the next round.
 		if err == unix.EAGAIN {
+			c.socketSendBufferFull = true
 			_, _ = c.outboundBuffer.Write(outFrame)
 			err = c.loop.poller.ModReadWrite(c.fd)
 			return
@@ -145,7 +147,7 @@ func (c *conn) write(buf []byte) (err error) {
 		return c.loop.loopCloseConn(c, os.NewSyscallError("write", err))
 	}
 	// Fail to send all data back to client, buffer the leftover data for the next round.
-	if n < len(outFrame) {
+	if c.socketSendBufferFull = n < len(outFrame); c.socketSendBufferFull {
 		_, _ = c.outboundBuffer.Write(outFrame[n:])
 		err = c.loop.poller.ModReadWrite(c.fd)
 	}
